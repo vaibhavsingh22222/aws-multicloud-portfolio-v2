@@ -8,17 +8,16 @@ on:
         description: Choose deployment action
         required: true
         type: choice
-        default: check-compute
+        default: check-all
         options:
-          - check-compute
-          - deploy-compute
-
+          - check-all
+          - deploy-all
 permissions:
   contents: read
 
 jobs:
   deploy:
-    name: AWS CloudFormation Compute
+    name: AWS CloudFormation deployment 
     runs-on: ubuntu-latest
 
     env:
@@ -56,16 +55,15 @@ jobs:
           echo "No AWS resources were deployed."
 
       - name: Deploy Compute Stack
-        if: inputs.action == 'deploy-compute'
+        if: inputs.action == 'deploy-all'
         run: |
           aws cloudformation deploy \
             --template-file cloudformation/compute.yaml \
             --stack-name portfolio-compute \
             --region "$AWS_REGION" \
             --no-fail-on-empty-changeset
-
       - name: Export CloudFormation Events
-        if: always() && inputs.action == 'deploy-compute'
+        if: always() && inputs.action == 'deploy-all'
         run: |
           mkdir -p deployment-events
 
@@ -75,9 +73,8 @@ jobs:
             --output json \
             > deployment-events/compute-events.json \
             2> deployment-events/events-error.txt || true
-
       - name: Upload Deployment Evidence
-        if: always() && inputs.action == 'deploy-compute'
+        if: always() && inputs.action == 'deploy-all'
         uses: actions/upload-artifact@v4
         with:
           name: compute-cloudformation-events
