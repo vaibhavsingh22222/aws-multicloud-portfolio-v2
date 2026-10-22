@@ -52,8 +52,7 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref WebTargetGroup
 
-  # REVIEW: private web instances need a route to yum/dnf package repositories
-  # via an approved NAT or a suitable prebuilt AMI before deployment.
+  # Private web instances use the NAT Gateway in networking.yaml.
   # EC2 LAUNCH TEMPLATE
 
   WebLaunchTemplate:
@@ -351,8 +350,6 @@ Resources:
 
             systemctl start httpd
 
-  # REVIEW: ASG subnet switch can replace running instances. Do not deploy
-  # until private subnet outbound access and existing stack export collisions are checked.
   # AUTO SCALING GROUP
 
   WebAutoScalingGroup:
