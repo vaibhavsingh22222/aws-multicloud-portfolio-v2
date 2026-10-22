@@ -1,0 +1,325 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: AWS Networking with Subnets and Transit Gateway (existing design, review pending)
+
+Resources:
+
+  # WEB VPC PUBLIC SUBNETS
+
+  WebPublicSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Fn::ImportValue: Portfolio-WebVPC-ID
+      CidrBlock: 10.10.1.0/24
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ''
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Web-Public-1
+
+  WebPublicSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Fn::ImportValue: Portfolio-WebVPC-ID
+      CidrBlock: 10.10.2.0/24
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ''
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Web-Public-2
+
+  # WEB VPC PRIVATE SUBNETS
+
+  WebPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Fn::ImportValue: Portfolio-WebVPC-ID
+      CidrBlock: 10.10.11.0/24
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ''
+      Tags:
+        - Key: Name
+          Value: Web-Private-1
+
+  WebPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Fn::ImportValue: Portfolio-WebVPC-ID
+      CidrBlock: 10.10.12.0/24
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ''
+      Tags:
+        - Key: Name
+          Value: Web-Private-2
+
+  # DATA VPC PRIVATE SUBNETS
+
+  DataPrivateSubnet1:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Fn::ImportValue: Portfolio-PrivateVPC-ID
+      CidrBlock: 10.20.1.0/24
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ''
+      Tags:
+        - Key: Name
+          Value: Data-Private-1
+
+  DataPrivateSubnet2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId:
+        Fn::ImportValue: Portfolio-PrivateVPC-ID
+      CidrBlock: 10.20.2.0/24
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ''
+      Tags:
+        - Key: Name
+          Value: Data-Private-2
+
+  # INTERNET GATEWAY
+
+  WebInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: Web-Internet-Gateway
+
+  WebIGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId:
+        Fn::ImportValue: Portfolio-WebVPC-ID
+      InternetGatewayId:
+        Ref: WebInternetGateway
+
+  # WEB PUBLIC ROUTE TABLE
+
+  WebPublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Fn::ImportValue: Portfolio-WebVPC-ID
+      Tags:
+        - Key: Name
+          Value: Web-Public-RT
+
+  WebPublicInternetRoute:
+    Type: AWS::EC2::Route
+    DependsOn: WebIGWAttachment
+    Properties:
+      RouteTableId:
+        Ref: WebPublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId:
+        Ref: WebInternetGateway
+
+  PublicSubnetAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: WebPublicSubnet1
+      RouteTableId:
+        Ref: WebPublicRouteTable
+
+  PublicSubnetAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: WebPublicSubnet2
+      RouteTableId:
+        Ref: WebPublicRouteTable
+
+  # REVIEW: private web route table has no default egress route; required
+  # for dnf install in compute.yaml; plan NAT, endpoints, or prebaked AMI.
+  # WEB PRIVATE ROUTE TABLE
+
+  WebPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Fn::ImportValue: Portfolio-WebVPC-ID
+      Tags:
+        - Key: Name
+          Value: Web-Private-RT
+
+  WebPrivateAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: WebPrivateSubnet1
+      RouteTableId:
+        Ref: WebPrivateRouteTable
+
+  WebPrivateAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: WebPrivateSubnet2
+      RouteTableId:
+        Ref: WebPrivateRouteTable
+
+  # DATA PRIVATE ROUTE TABLE
+
+  DataPrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId:
+        Fn::ImportValue: Portfolio-PrivateVPC-ID
+      Tags:
+        - Key: Name
+          Value: Data-Private-RT
+
+  DataPrivateAssociation1:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: DataPrivateSubnet1
+      RouteTableId:
+        Ref: DataPrivateRouteTable
+
+  DataPrivateAssociation2:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId:
+        Ref: DataPrivateSubnet2
+      RouteTableId:
+        Ref: DataPrivateRouteTable
+
+  # TRANSIT GATEWAY
+
+  PortfolioTransitGateway:
+    Type: AWS::EC2::TransitGateway
+    Properties:
+      Description: Connect Web VPC and Data VPC
+      AmazonSideAsn: 64512
+      DnsSupport: enable
+      DefaultRouteTableAssociation: enable
+      DefaultRouteTablePropagation: enable
+      Tags:
+        - Key: Name
+          Value: Portfolio-Transit-Gateway
+
+  # TRANSIT GATEWAY ATTACHMENTS
+
+  WebTransitAttachment:
+    Type: AWS::EC2::TransitGatewayVpcAttachment
+    Properties:
+      TransitGatewayId:
+        Ref: PortfolioTransitGateway
+      VpcId:
+        Fn::ImportValue: Portfolio-WebVPC-ID
+      SubnetIds:
+        - Ref: WebPrivateSubnet1
+        - Ref: WebPrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: Web-TGW-Attachment
+
+  DataTransitAttachment:
+    Type: AWS::EC2::TransitGatewayVpcAttachment
+    Properties:
+      TransitGatewayId:
+        Ref: PortfolioTransitGateway
+      VpcId:
+        Fn::ImportValue: Portfolio-PrivateVPC-ID
+      SubnetIds:
+        - Ref: DataPrivateSubnet1
+        - Ref: DataPrivateSubnet2
+      Tags:
+        - Key: Name
+          Value: Data-TGW-Attachment
+
+  # ROUTES BETWEEN VPCS
+
+  WebToDataRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - WebTransitAttachment
+      - DataTransitAttachment
+    Properties:
+      RouteTableId:
+        Ref: WebPrivateRouteTable
+      DestinationCidrBlock: 10.20.0.0/16
+      TransitGatewayId:
+        Ref: PortfolioTransitGateway
+
+  DataToWebRoute:
+    Type: AWS::EC2::Route
+    DependsOn:
+      - WebTransitAttachment
+      - DataTransitAttachment
+    Properties:
+      RouteTableId:
+        Ref: DataPrivateRouteTable
+      DestinationCidrBlock: 10.10.0.0/16
+      TransitGatewayId:
+        Ref: PortfolioTransitGateway
+
+Outputs:
+
+  TransitGatewayId:
+    Description: Transit Gateway ID
+    Value:
+      Ref: PortfolioTransitGateway
+
+  WebPublicSubnet1Id:
+    Description: First public subnet ID
+    Value:
+      Ref: WebPublicSubnet1
+    Export:
+      Name: Portfolio-WebPublicSubnet1-ID
+
+  WebPublicSubnet2Id:
+    Description: Second public subnet ID
+    Value:
+      Ref: WebPublicSubnet2
+    Export:
+      Name: Portfolio-WebPublicSubnet2-ID
+
+  WebPrivateSubnet1Id:
+    Description: First private web subnet ID
+    Value:
+      Ref: WebPrivateSubnet1
+    Export:
+      Name: Portfolio-WebPrivateSubnet1-ID
+
+  WebPrivateSubnet2Id:
+    Description: Second private web subnet ID
+    Value:
+      Ref: WebPrivateSubnet2
+    Export:
+      Name: Portfolio-WebPrivateSubnet2-ID
+
+  DataPrivateSubnet1Id:
+    Description: First private data subnet ID
+    Value:
+      Ref: DataPrivateSubnet1
+    Export:
+      Name: Portfolio-DataPrivateSubnet1-ID
+
+  DataPrivateSubnet2Id:
+    Description: Second private data subnet ID
+    Value:
+      Ref: DataPrivateSubnet2
+    Export:
+      Name: Portfolio-DataPrivateSubnet2-ID
