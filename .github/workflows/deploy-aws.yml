@@ -1,0 +1,85 @@
+
+name: Deploy AWS Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Choose deployment action
+        required: true
+        type: choice
+        default: check-compute
+        options:
+          - check-compute
+          - deploy-compute
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: AWS CloudFormation Compute
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Academy Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS Connection
+        run: aws sts get-caller-identity
+
+      - name: Check Compute File
+        run: |
+          test -f cloudformation/compute.yaml
+          echo "Compute template found."
+
+      - name: Check Compute Template Syntax
+        run: |
+          python -m pip install --quiet cfn-lint
+          cfn-lint cloudformation/compute.yaml
+
+      - name: Compute Preflight Complete
+        if: inputs.action == 'check-compute'
+        run: |
+          echo "Connection and template checks completed."
+          echo "No AWS resources were deployed."
+
+      - name: Deploy Compute Stack
+        if: inputs.action == 'deploy-compute'
+        run: |
+          aws cloudformation deploy \
+            --template-file cloudformation/compute.yaml \
+            --stack-name portfolio-compute \
+            --region "$AWS_REGION" \
+            --no-fail-on-empty-changeset
+
+      - name: Export CloudFormation Events
+        if: always() && inputs.action == 'deploy-compute'
+        run: |
+          mkdir -p deployment-events
+
+          aws cloudformation describe-stack-events \
+            --stack-name portfolio-compute \
+            --region "$AWS_REGION" \
+            --output json \
+            > deployment-events/compute-events.json \
+            2> deployment-events/events-error.txt || true
+
+      - name: Upload Deployment Evidence
+        if: always() && inputs.action == 'deploy-compute'
+        uses: actions/upload-artifact@v4
+        with:
+          name: compute-cloudformation-events
+          path: deployment-events/
+          if-no-files-found: warn
