@@ -1,9 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: AWS Multicloud Portfolio - VPC Infrastructure
-
 Resources:
-
-  # Web VPC
   WebVPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -11,10 +8,8 @@ Resources:
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
-        - Key: Name
-          Value: Web-VPC
-
-  # Private Data VPC
+      - Key: Name
+        Value: Web-VPC
   PrivateVPC:
     Type: AWS::EC2::VPC
     Properties:
@@ -22,19 +17,16 @@ Resources:
       EnableDnsSupport: true
       EnableDnsHostnames: true
       Tags:
-        - Key: Name
-          Value: Private-VPC
-
+      - Key: Name
+        Value: Private-VPC
 Outputs:
-
   WebVPCId:
-    Description: Web VPC ID
-    Value: !Ref WebVPC
+    Value:
+      Ref: WebVPC
     Export:
       Name: Portfolio-WebVPC-ID
-
   PrivateVPCId:
-    Description: Private VPC ID
-    Value: !Ref PrivateVPC
+    Value:
+      Ref: PrivateVPC
     Export:
       Name: Portfolio-PrivateVPC-ID
