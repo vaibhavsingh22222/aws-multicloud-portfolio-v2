@@ -1,72 +1,66 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Description: AWS Security Groups for Web and Data VPCs
-
 Resources:
-
-  # Load Balancer Security Group
   ALBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow public HTTP to load balancer
-      VpcId: !ImportValue Portfolio-WebVPC-ID
+      VpcId:
+        Fn::ImportValue: Portfolio-WebVPC-ID
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
       Tags:
-        - Key: Name
-          Value: Portfolio-ALB-SG
-
-  # Web Server Security Group
+      - Key: Name
+        Value: Portfolio-ALB-SG
   WebSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: Allow HTTP only from ALB
-      VpcId: !ImportValue Portfolio-WebVPC-ID
+      VpcId:
+        Fn::ImportValue: Portfolio-WebVPC-ID
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          SourceSecurityGroupId: !Ref ALBSecurityGroup
+      - IpProtocol: tcp
+        FromPort: 80
+        ToPort: 80
+        SourceSecurityGroupId:
+          Ref: ALBSecurityGroup
       Tags:
-        - Key: Name
-          Value: Portfolio-Web-SG
-
-  # REVIEW: database currently allows MySQL from both private web CIDRs.
-  # Verify least privilege and add authorized management-instance rules.
-  # Database Security Group
+      - Key: Name
+        Value: Portfolio-Web-SG
   DatabaseSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow MySQL from Web VPC CIDR
-      VpcId: !ImportValue Portfolio-PrivateVPC-ID
+      GroupDescription: Allow MySQL from private web subnet CIDRs
+      VpcId:
+        Fn::ImportValue: Portfolio-PrivateVPC-ID
       SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          CidrIp: 10.10.11.0/24
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          CidrIp: 10.10.12.0/24
+      - IpProtocol: tcp
+        FromPort: 3306
+        ToPort: 3306
+        CidrIp: 10.10.11.0/24
+      - IpProtocol: tcp
+        FromPort: 3306
+        ToPort: 3306
+        CidrIp: 10.10.12.0/24
       Tags:
-        - Key: Name
-          Value: Portfolio-Database-SG
-
+      - Key: Name
+        Value: Portfolio-Database-SG
 Outputs:
-
   ALBSecurityGroupId:
-    Value: !Ref ALBSecurityGroup
+    Value:
+      Ref: ALBSecurityGroup
     Export:
       Name: Portfolio-ALB-SG-ID
-
   WebSecurityGroupId:
-    Value: !Ref WebSecurityGroup
+    Value:
+      Ref: WebSecurityGroup
     Export:
       Name: Portfolio-Web-SG-ID
-
   DatabaseSecurityGroupId:
-    Value: !Ref DatabaseSecurityGroup
+    Value:
+      Ref: DatabaseSecurityGroup
     Export:
       Name: Portfolio-Database-SG-ID
