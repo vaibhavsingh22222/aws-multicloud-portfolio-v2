@@ -1,14 +1,18 @@
 AWSTemplateFormatVersion: '2010-09-09'
-Description: AWS Web Servers with ALB, Auto Scaling and Azure HLS Video Player
+Description: Portfolio website with Azure video and RDS catalogue
 
 Parameters:
+
   LatestAmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 
-Resources:
+  ExistingInstanceProfile:
+    Type: String
+    Default: LabInstanceProfile
+    Description: Existing profile with permission to read the database secret
 
-  # APPLICATION LOAD BALANCER
+Resources:
 
   WebLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
@@ -24,8 +28,6 @@ Resources:
         - Key: Name
           Value: Portfolio-Web-ALB
 
-  # TARGET GROUP
-
   WebTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
@@ -40,8 +42,6 @@ Resources:
       Matcher:
         HttpCode: '200'
 
-  # HTTP LISTENER
-
   WebListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
@@ -52,15 +52,20 @@ Resources:
         - Type: forward
           TargetGroupArn: !Ref WebTargetGroup
 
-  # Private web instances use the NAT Gateway in networking.yaml.
-  # EC2 LAUNCH TEMPLATE
-
   WebLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
       LaunchTemplateData:
         ImageId: !Ref LatestAmiId
         InstanceType: t3.micro
+
+        IamInstanceProfile:
+          Name: !Ref ExistingInstanceProfile
+
+        MetadataOptions:
+          HttpTokens: required
+          HttpEndpoint: enabled
+
         NetworkInterfaces:
           - DeviceIndex: 0
             AssociatePublicIpAddress: false
@@ -69,292 +74,513 @@ Resources:
               - Fn::ImportValue: Portfolio-Web-SG-ID
 
         UserData:
-          Fn::Base64: |
-            #!/bin/bash
-            set -e
+          Fn::Base64:
+            Fn::Sub:
+              - |
+                #!/bin/bash
+                set -e
 
-            dnf install -y httpd
-            systemctl enable httpd
+                dnf install -y httpd python3 python3-pip
+                python3 -m venv /opt/portfolio-env
+                /opt/portfolio-env/bin/pip install boto3 pymysql cryptography
 
-            cat > /var/www/html/index.html <<'EOF'
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-              <meta charset="UTF-8">
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                mkdir -p /opt/portfolio
 
-              <title>AWS Azure Multicloud Video Portfolio</title>
+                curl --fail --retry 3 \
+                  https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+                  -o /opt/portfolio/rds-ca.pem
 
-              <style>
-                * {
-                  box-sizing: border-box;
-                }
+                systemctl enable httpd
 
-                body {
-                  margin: 0;
-                  font-family: Arial, sans-serif;
-                  background: #0f172a;
-                  color: white;
-                }
+                cat > /var/www/html/index.html <<'HTML'
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                  <meta charset="UTF-8">
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <title>AWS Azure Multicloud Video Portfolio</title>
 
-                header {
-                  background: #1e293b;
-                  padding: 25px;
-                  text-align: center;
-                }
-
-                header h1 {
-                  color: #38bdf8;
-                  margin: 0;
-                }
-
-                main {
-                  max-width: 1000px;
-                  margin: 30px auto;
-                  padding: 20px;
-                }
-
-                .card {
-                  background: #1e293b;
-                  padding: 25px;
-                  border-radius: 12px;
-                  margin-bottom: 20px;
-                }
-
-                h2 {
-                  color: #38bdf8;
-                }
-
-                video {
-                  width: 100%;
-                  background: black;
-                  border-radius: 8px;
-                }
-
-                input {
-                  width: 100%;
-                  padding: 12px;
-                  margin: 10px 0;
-                  border-radius: 6px;
-                  border: 1px solid #64748b;
-                }
-
-                button {
-                  padding: 12px 24px;
-                  background: #0284c7;
-                  color: white;
-                  border: none;
-                  border-radius: 6px;
-                  cursor: pointer;
-                }
-
-                button:hover {
-                  background: #0369a1;
-                }
-
-                .status {
-                  color: #facc15;
-                  margin-top: 12px;
-                }
-
-                .features {
-                  display: grid;
-                  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                  gap: 15px;
-                }
-
-                .feature {
-                  background: #334155;
-                  padding: 20px;
-                  border-radius: 8px;
-                }
-
-                footer {
-                  text-align: center;
-                  padding: 25px;
-                  color: #cbd5e1;
-                }
-              </style>
-
-              <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
-            </head>
-
-            <body>
-              <header>
-                <h1>AWS Azure Multicloud Portfolio</h1>
-                <p>Cloud Video Streaming Project</p>
-              </header>
-
-              <main>
-
-                <section class="card">
-                  <h2>Steamboat Willie Video Streaming</h2>
-
-                  <p>
-                    The website runs on AWS EC2, while video
-                    segments are hosted in Azure Blob Storage.
-                  </p>
-
-                  <video id="videoPlayer" controls playsinline></video>
-
-                  <p id="status" class="status">
-                    Waiting for playback access.
-                  </p>
-                </section>
-
-                <section class="card">
-                  <h2>Azure Video Access</h2>
-
-                  <p>
-                    Enter a temporary read-only container SAS
-                    token for testing. Do not use a permanent
-                    storage account key.
-                  </p>
-
-                  <input
-                    type="password"
-                    id="sasToken"
-                    placeholder="Paste temporary SAS token"
-                    autocomplete="off"
-                  >
-
-                  <button id="playButton" type="button">
-                    Load Azure Video
-                  </button>
-
-                  <p>
-                    A valid token must allow access to the
-                    master playlist, quality playlists and
-                    video segments.
-                  </p>
-                </section>
-
-                <section class="card">
-                  <h2>Multicloud Architecture</h2>
-
-                  <div class="features">
-
-                    <div class="feature">
-                      <h3>AWS EC2</h3>
-                      <p>Hosts the video website.</p>
-                    </div>
-
-                    <div class="feature">
-                      <h3>AWS Load Balancer</h3>
-                      <p>Distributes website traffic.</p>
-                    </div>
-
-                    <div class="feature">
-                      <h3>Azure Blob Storage</h3>
-                      <p>Stores HLS playlists and video segments.</p>
-                    </div>
-
-                    <div class="feature">
-                      <h3>Adaptive Streaming</h3>
-                      <p>Supports 360p and 480p video.</p>
-                    </div>
-
-                  </div>
-                </section>
-
-              </main>
-
-              <footer>
-                <p>
-                  AWS and Azure Multicloud Portfolio
-                </p>
-                <p>
-                  Infrastructure deployed with GitHub and CloudFormation
-                </p>
-              </footer>
-
-              <script>
-                const video = document.getElementById("videoPlayer");
-                const status = document.getElementById("status");
-                const tokenInput = document.getElementById("sasToken");
-
-                const manifest =
-                  "https://portfoliovideostore26.blob.core.windows.net/video/master.m3u8";
-
-                let hls = null;
-
-                document.getElementById("playButton")
-                  .addEventListener("click", loadVideo);
-
-                function loadVideo() {
-
-                  const token = tokenInput.value.trim().replace(/^\?/, "");
-
-                  if (!token) {
-                    status.textContent = "Enter a temporary SAS token.";
-                    return;
-                  }
-
-                  const params = new URLSearchParams(token);
-
-                  if (!params.has("sig") || !params.has("se")) {
-                    status.textContent = "Invalid SAS token format.";
-                    return;
-                  }
-
-                  if (typeof Hls === "undefined") {
-                    status.textContent = "HLS player library did not load.";
-                    return;
-                  }
-
-                  if (!Hls.isSupported()) {
-                    status.textContent =
-                      "Use Chrome or Edge for this authenticated HLS test.";
-                    return;
-                  }
-
-                  if (hls) {
-                    hls.destroy();
-                  }
-
-                  hls = new Hls({
-                    enableWorker: true,
-                    xhrSetup: function(xhr, url) {
-                      const separator = url.includes("?") ? "&" : "?";
-                      xhr.open("GET", url + separator + token, true);
+                  <style>
+                    * {
+                      box-sizing: border-box;
                     }
-                  });
 
-                  status.textContent = "Loading video from Azure...";
-
-                  hls.loadSource(manifest);
-                  hls.attachMedia(video);
-
-                  hls.on(Hls.Events.MANIFEST_PARSED, function() {
-                    status.textContent = "Video ready.";
-                    video.play().catch(function() {
-                      status.textContent =
-                        "Video ready. Press Play to start.";
-                    });
-                  });
-
-                  hls.on(Hls.Events.ERROR, function(event, data) {
-                    if (data.fatal) {
-                      status.textContent =
-                        "Playback error: " + data.details;
+                    body {
+                      margin: 0;
+                      font-family: Arial, sans-serif;
+                      background: #0f172a;
+                      color: white;
                     }
-                  });
 
-                  tokenInput.value = "";
-                }
-              </script>
+                    header {
+                      background: #1e293b;
+                      padding: 25px;
+                      text-align: center;
+                    }
 
-            </body>
-            </html>
-            EOF
+                    header h1 {
+                      color: #38bdf8;
+                      margin: 0;
+                    }
 
-            systemctl start httpd
+                    main {
+                      max-width: 1000px;
+                      margin: 30px auto;
+                      padding: 20px;
+                    }
 
-  # AUTO SCALING GROUP
+                    .card {
+                      background: #1e293b;
+                      padding: 25px;
+                      border-radius: 12px;
+                      margin-bottom: 20px;
+                    }
+
+                    h2 {
+                      color: #38bdf8;
+                    }
+
+                    video {
+                      width: 100%;
+                      background: black;
+                      border-radius: 8px;
+                    }
+
+                    input {
+                      width: 100%;
+                      padding: 12px;
+                      margin: 10px 0;
+                      border-radius: 6px;
+                      border: 1px solid #64748b;
+                    }
+
+                    button {
+                      padding: 12px 24px;
+                      background: #0284c7;
+                      color: white;
+                      border: none;
+                      border-radius: 6px;
+                      cursor: pointer;
+                    }
+
+                    button:hover {
+                      background: #0369a1;
+                    }
+
+                    .status {
+                      color: #facc15;
+                      margin-top: 12px;
+                    }
+
+                    .features {
+                      display: grid;
+                      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                      gap: 15px;
+                    }
+
+                    .feature {
+                      background: #334155;
+                      padding: 20px;
+                      border-radius: 8px;
+                    }
+
+                    footer {
+                      text-align: center;
+                      padding: 25px;
+                      color: #cbd5e1;
+                    }
+                  </style>
+
+                  <script src="https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js"></script>
+                </head>
+
+                <body>
+                  <header>
+                    <h1>AWS Azure Multicloud Portfolio</h1>
+                    <p>Cloud Video Streaming Project</p>
+                  </header>
+
+                  <main>
+                    <section class="card">
+                      <h2>Steamboat Willie Video Streaming</h2>
+
+                      <p>
+                        The website runs on AWS EC2, while video
+                        segments are hosted in Azure Blob Storage.
+                      </p>
+
+                      <video id="videoPlayer" controls playsinline></video>
+
+                      <p id="status" class="status">
+                        Waiting for playback access.
+                      </p>
+                    </section>
+
+                    <section class="card">
+                      <h2>Azure Video Access</h2>
+
+                      <p>
+                        Enter a temporary read-only container SAS
+                        token for testing. Do not use a permanent
+                        storage account key.
+                      </p>
+
+                      <input
+                        type="password"
+                        id="sasToken"
+                        placeholder="Paste temporary SAS token"
+                        autocomplete="off"
+                      >
+
+                      <button id="playButton" type="button">
+                        Load Azure Video
+                      </button>
+
+                      <p>
+                        A valid token must allow access to the
+                        master playlist, quality playlists and
+                        video segments.
+                      </p>
+                    </section>
+
+                    <section class="card">
+                      <h2>Multicloud Architecture</h2>
+
+                      <div class="features">
+                        <div class="feature">
+                          <h3>AWS EC2</h3>
+                          <p>Hosts the video website.</p>
+                        </div>
+
+                        <div class="feature">
+                          <h3>AWS Load Balancer</h3>
+                          <p>Distributes website traffic.</p>
+                        </div>
+
+                        <div class="feature">
+                          <h3>Azure Blob Storage</h3>
+                          <p>Stores HLS playlists and video segments.</p>
+                        </div>
+
+                        <div class="feature">
+                          <h3>Adaptive Streaming</h3>
+                          <p>Supports 360p and 480p video.</p>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section class="card">
+                      <h2>Video catalogue from Amazon RDS</h2>
+                      <p id="databaseResult">Loading catalogue...</p>
+
+                      <button type="button" onclick="loadCatalogue()">
+                        Refresh database record
+                      </button>
+                    </section>
+                  </main>
+
+                  <footer>
+                    <p>AWS and Azure Multicloud Portfolio</p>
+                    <p>Infrastructure deployed with GitHub and CloudFormation</p>
+                  </footer>
+
+                  <script>
+                    async function loadCatalogue() {
+                      const label = document.getElementById("databaseResult");
+
+                      try {
+                        const response = await fetch(
+                          "/api/catalogue",
+                          { cache: "no-store" }
+                        );
+
+                        const data = await response.json();
+
+                        if (!response.ok) {
+                          throw new Error(data.message);
+                        }
+
+                        label.textContent =
+                          "Database connected: " +
+                          data.title +
+                          " | " +
+                          data.description;
+
+                      } catch (error) {
+                        label.textContent =
+                          error.message || "Database unavailable";
+                      }
+                    }
+
+                    loadCatalogue();
+
+                    const video = document.getElementById("videoPlayer");
+                    const status = document.getElementById("status");
+                    const tokenInput = document.getElementById("sasToken");
+
+                    const manifest =
+                      "https://Test505azcdn-ebdwbdh5g9fhd2a5.a03.azurefd.net/video/master.m3u8";
+
+                    let hls = null;
+
+                    document.getElementById("playButton")
+                      .addEventListener("click", loadVideo);
+
+                    function loadVideo() {
+                      const token = tokenInput.value.trim().replace(/^\?/, "");
+
+                      if (!token) {
+                        status.textContent = "Enter a temporary SAS token.";
+                        return;
+                      }
+
+                      const params = new URLSearchParams(token);
+
+                      if (!params.has("sig") || !params.has("se")) {
+                        status.textContent = "Invalid SAS token format.";
+                        return;
+                      }
+
+                      if (typeof Hls === "undefined") {
+                        status.textContent = "HLS player library did not load.";
+                        return;
+                      }
+
+                      if (!Hls.isSupported()) {
+                        status.textContent =
+                          "Use Chrome or Edge for this authenticated HLS test.";
+                        return;
+                      }
+
+                      if (hls) {
+                        hls.destroy();
+                      }
+
+                      hls = new Hls({
+                        enableWorker: true,
+
+                        xhrSetup: function(xhr, url) {
+                          const separator = url.includes("?") ? "&" : "?";
+                          xhr.open("GET", url + separator + token, true);
+                        }
+                      });
+
+                      status.textContent = "Loading video from Azure...";
+
+                      hls.loadSource(manifest);
+                      hls.attachMedia(video);
+
+                      hls.on(Hls.Events.MANIFEST_PARSED, function() {
+                        status.textContent = "Video ready.";
+
+                        video.play().catch(function() {
+                          status.textContent =
+                            "Video ready. Press Play to start.";
+                        });
+                      });
+
+                      hls.on(Hls.Events.ERROR, function(event, data) {
+                        if (data.fatal) {
+                          status.textContent =
+                            "Playback error: " + data.details;
+                        }
+                      });
+
+                      tokenInput.value = "";
+                    }
+                  </script>
+                </body>
+                </html>
+                HTML
+
+                cat > /opt/portfolio/settings.json <<'SETTINGS'
+                {"host":"${DatabaseHost}","secret":"${DatabaseSecret}","region":"${AWS::Region}"}
+                SETTINGS
+
+                cat > /opt/portfolio/backend.py <<'PYTHON'
+                import json
+                import logging
+                import threading
+                import time
+
+                from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+                import boto3
+                import pymysql
+
+                from botocore.config import Config
+
+                with open("/opt/portfolio/settings.json") as settings_file:
+                    settings = json.load(settings_file)
+
+                secrets = boto3.client(
+                    "secretsmanager",
+                    region_name=settings["region"],
+                    config=Config(
+                        connect_timeout=5,
+                        read_timeout=5,
+                        retries={"max_attempts": 2}
+                    )
+                )
+
+                def connection():
+                    result = secrets.get_secret_value(
+                        SecretId=settings["secret"]
+                    )
+
+                    credentials = json.loads(result["SecretString"])
+
+                    return pymysql.connect(
+                        host=settings["host"],
+                        user=credentials["username"],
+                        password=credentials["password"],
+                        database="portfolio",
+                        connect_timeout=5,
+                        read_timeout=5,
+                        write_timeout=5,
+                        autocommit=True,
+                        ssl_ca="/opt/portfolio/rds-ca.pem",
+                        ssl_verify_cert=True,
+                        ssl_verify_identity=True
+                    )
+
+                def initialize():
+                    while True:
+                        try:
+                            with connection() as database:
+                                with database.cursor() as cursor:
+                                    cursor.execute(
+                                        "CREATE TABLE IF NOT EXISTS catalogue "
+                                        "(id INT PRIMARY KEY, "
+                                        "title VARCHAR(150), "
+                                        "description VARCHAR(250))"
+                                    )
+
+                                    cursor.execute(
+                                        "INSERT IGNORE INTO catalogue "
+                                        "VALUES (%s, %s, %s)",
+                                        (
+                                            1,
+                                            "Steamboat Willie",
+                                            "360p and 480p HLS delivered through "
+                                            "Azure Front Door"
+                                        )
+                                    )
+
+                            return
+
+                        except Exception:
+                            logging.exception(
+                                "Catalogue initialization failed; retrying"
+                            )
+                            time.sleep(20)
+
+                class Handler(BaseHTTPRequestHandler):
+                    def do_GET(self):
+                        if self.path != "/api/catalogue":
+                            self.send_error(404)
+                            return
+
+                        try:
+                            with connection() as database:
+                                with database.cursor() as cursor:
+                                    cursor.execute(
+                                        "SELECT title, description "
+                                        "FROM catalogue WHERE id=%s",
+                                        (1,)
+                                    )
+                                    row = cursor.fetchone()
+
+                            if row is None:
+                                raise RuntimeError("Catalogue not ready")
+
+                            body = {
+                                "title": row[0],
+                                "description": row[1]
+                            }
+                            status = 200
+
+                        except Exception:
+                            logging.exception("Database read failed")
+
+                            body = {
+                                "message":
+                                "Database is not ready. "
+                                "Try Refresh database record shortly."
+                            }
+                            status = 503
+
+                        payload = json.dumps(body).encode()
+
+                        self.send_response(status)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Cache-Control", "no-store")
+                        self.send_header(
+                            "Content-Length",
+                            str(len(payload))
+                        )
+                        self.end_headers()
+                        self.wfile.write(payload)
+
+                if __name__ == "__main__":
+                    threading.Thread(
+                        target=initialize,
+                        daemon=True
+                    ).start()
+
+                    ThreadingHTTPServer(
+                        ("127.0.0.1", 8080),
+                        Handler
+                    ).serve_forever()
+                PYTHON
+
+                chmod 600 /opt/portfolio/settings.json
+
+                cat > /etc/httpd/conf.d/portfolio-api.conf <<'APACHE'
+                ProxyPass /api/ http://127.0.0.1:8080/api/ connectiontimeout=5 timeout=30
+                ProxyPassReverse /api/ http://127.0.0.1:8080/api/
+                APACHE
+
+                if command -v getenforce >/dev/null && [ "$(getenforce)" != "Disabled" ]; then
+                    setsebool -P httpd_can_network_connect 1
+                fi
+
+                cat > /etc/systemd/system/portfolio-api.service <<'SERVICE'
+                [Unit]
+                Description=Portfolio database API
+                After=network-online.target
+                Wants=network-online.target
+
+                [Service]
+                ExecStart=/opt/portfolio-env/bin/python /opt/portfolio/backend.py
+                Restart=always
+                RestartSec=5
+                NoNewPrivileges=true
+                PrivateTmp=true
+
+                [Install]
+                WantedBy=multi-user.target
+                SERVICE
+
+                systemctl daemon-reload
+                systemctl enable --now portfolio-api
+                systemctl start httpd
+
+              - DatabaseHost:
+                  Fn::ImportValue: Portfolio-DB-Endpoint
+                DatabaseSecret:
+                  Fn::ImportValue: Portfolio-DB-SecretArn
 
   WebAutoScalingGroup:
     Type: AWS::AutoScaling::AutoScalingGroup
     DependsOn: WebListener
+
+    UpdatePolicy:
+      AutoScalingRollingUpdate:
+        MinInstancesInService: 1
+        MaxBatchSize: 1
+        PauseTime: PT5M
+
     Properties:
       VPCZoneIdentifier:
         - Fn::ImportValue: Portfolio-WebPrivateSubnet1-ID
