@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Portfolio MySQL primary and private read replica
+
+Resources:
+
+  DatabaseSubnets:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private portfolio data subnets
+      SubnetIds:
+        - Fn::ImportValue: Portfolio-DataPrivateSubnet1-ID
+        - Fn::ImportValue: Portfolio-DataPrivateSubnet2-ID
+
+  DatabaseCredentials:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Portfolio demo MySQL credentials
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"portfolioadmin"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludeCharacters: '"/@\'
+
+  PrimaryDatabase:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      Engine: mysql
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: '20'
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: portfolio
+      MasterUsername: portfolioadmin
+      MasterUserPassword:
+        Fn::Sub: '{{resolve:secretsmanager:${DatabaseCredentials}:SecretString:password}}'
+      DBSubnetGroupName: !Ref DatabaseSubnets
+      VPCSecurityGroups:
+        - Fn::ImportValue: Portfolio-Database-SG-ID
+      PubliclyAccessible: false
+      BackupRetentionPeriod: 1
+      MultiAZ: false
+      AvailabilityZone:
+        Fn::Select:
+          - 0
+          - Fn::GetAZs: ''
+      DeletionProtection: false
+
+  ReadReplica:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      SourceDBInstanceIdentifier: !Ref PrimaryDatabase
+      DBInstanceClass: db.t3.micro
+      PubliclyAccessible: false
+      AvailabilityZone:
+        Fn::Select:
+          - 1
+          - Fn::GetAZs: ''
+      VPCSecurityGroups:
+        - Fn::ImportValue: Portfolio-Database-SG-ID
+
+Outputs:
+
+  PrimaryEndpoint:
+    Value: !GetAtt PrimaryDatabase.Endpoint.Address
+    Export:
+      Name: Portfolio-DB-Endpoint
+
+  ReplicaEndpoint:
+    Value: !GetAtt ReadReplica.Endpoint.Address
+    Export:
+      Name: Portfolio-DB-ReplicaEndpoint
+
+  CredentialsSecretArn:
+    Value: !Ref DatabaseCredentials
+    Export:
+      Name: Portfolio-DB-SecretArn
