@@ -23,11 +23,15 @@ jobs:
   deploy:
     name: AWS CloudFormation deployment
     runs-on: ubuntu-latest
+
     env:
       AWS_REGION: us-east-1
+
     steps:
+
       - name: Checkout Repository
         uses: actions/checkout@v4
+
       - name: Configure AWS Academy Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -35,27 +39,34 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
+
       - name: Verify AWS Connection
         run: aws sts get-caller-identity
+
       - name: Set Up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
       - name: Check AWS YAML Files
         run: |
           test -f cloudformation/infrastructure.yaml
           test -f cloudformation/networking.yaml
           test -f cloudformation/security.yaml
+          test -f cloudformation/database.yaml
           test -f cloudformation/compute.yaml
+
       - name: Check All Template Syntax
         run: |
           python -m pip install --quiet cfn-lint
           cfn-lint cloudformation/*.yaml
+
       - name: Preflight Complete
         if: inputs.action == 'check-all'
         run: |
           echo "Connection and template checks completed."
           echo "No AWS resources were deployed."
+
       - name: Deploy Infrastructure Stack
         if: inputs.action == 'deploy-all'
         run: |
@@ -64,6 +75,7 @@ jobs:
             --stack-name portfolio-infrastructure \
             --region "$AWS_REGION" \
             --no-fail-on-empty-changeset
+
       - name: Deploy Networking Stack
         if: inputs.action == 'deploy-all'
         run: |
@@ -72,6 +84,7 @@ jobs:
             --stack-name portfolio-networking \
             --region "$AWS_REGION" \
             --no-fail-on-empty-changeset
+
       - name: Deploy Security Stack
         if: inputs.action == 'deploy-all'
         run: |
@@ -80,6 +93,16 @@ jobs:
             --stack-name portfolio-security \
             --region "$AWS_REGION" \
             --no-fail-on-empty-changeset
+
+      - name: Deploy Database Stack
+        if: inputs.action == 'deploy-all'
+        run: |
+          aws cloudformation deploy \
+            --template-file cloudformation/database.yaml \
+            --stack-name portfolio-database \
+            --region "$AWS_REGION" \
+            --no-fail-on-empty-changeset
+
       - name: Deploy Compute Stack
         if: inputs.action == 'deploy-all'
         run: |
@@ -88,11 +111,13 @@ jobs:
             --stack-name portfolio-compute \
             --region "$AWS_REGION" \
             --no-fail-on-empty-changeset
+
       - name: Export CloudFormation Events
         if: always() && inputs.action == 'deploy-all'
         run: |
           mkdir -p deployment-events
-          for stack in portfolio-infrastructure portfolio-networking portfolio-security portfolio-compute; do
+
+          for stack in portfolio-infrastructure portfolio-networking portfolio-security portfolio-database portfolio-compute; do
             aws cloudformation describe-stack-events \
               --stack-name "$stack" \
               --region "$AWS_REGION" \
@@ -100,6 +125,7 @@ jobs:
               > "deployment-events/${stack}-events.json" \
               2> "deployment-events/${stack}-error.txt" || true
           done
+
       - name: Upload Deployment Evidence
         if: always() && inputs.action == 'deploy-all'
         uses: actions/upload-artifact@v4
